@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Gleam — Intelligence Sociale",
+    "slug": "gleam-intelligence-sociale",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0F0F23"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.gleamlabs.intelligence-sociale"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0F0F23"
+      },
+      "package": "com.gleamlabs.intelligence_sociale"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

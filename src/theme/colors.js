@@ -1,0 +1,33 @@
+export const colors = {
+  primary: '#7C3AED',
+  primaryLight: '#A78BFA',
+  primaryDark: '#5B21B6',
+  secondary: '#EC4899',
+  accent: '#06B6D4',
+  accentGreen: '#10B981',
+  background: '#0F0F23',
+  surface: '#1A1A35',
+  surfaceLight: '#252548',
+  card: '#1E1E40',
+  text: '#FFFFFF',
+  textSecondary: '#9CA3AF',
+  textMuted: '#6B7280',
+  success: '#10B981',
+  warning: '#F59E0B',
+  error: '#EF4444',
+  gold: '#F59E0B',
+  border: '#2D2D5E',
+  gradientStart: '#7C3AED',
+  gradientEnd: '#EC4899',
+};
+
+export const categoryColors = {
+  communication: '#7C3AED',
+  emotional: '#EC4899',
+  leadership: '#F59E0B',
+  networking: '#10B981',
+  speaking: '#06B6D4',
+  conflict: '#EF4444',
+  empathy: '#8B5CF6',
+  interview: '#F97316',
+};

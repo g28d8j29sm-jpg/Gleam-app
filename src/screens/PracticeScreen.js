@@ -8,14 +8,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme/colors';
 import { practiceScenarios } from '../data/courses';
-
-function getRandomResponse(scenario, messageCount) {
-  const allResponses = [
-    ...Object.values(scenario.responses).flat(),
-  ];
-  const idx = messageCount % allResponses.length;
-  return allResponses[idx] || 'Je vous écoute. Pouvez-vous développer davantage ?';
-}
+import { getAIResponse, isAIEnabled } from '../services/claudeAI';
+import { useApp } from '../context/AppContext';
+import { XP_REWARDS } from '../services/storage';
 
 function ScenarioCard({ scenario, onStart }) {
   return (
@@ -27,11 +22,14 @@ function ScenarioCard({ scenario, onStart }) {
         <Text style={styles.scenarioTitle}>{scenario.title}</Text>
         <Text style={styles.scenarioDesc} numberOfLines={2}>{scenario.description}</Text>
         <View style={styles.scenarioMeta}>
-          <View style={[styles.difficultyBadge, { backgroundColor: scenario.color + '22' }]}>
-            <Text style={[styles.difficultyText, { color: scenario.color }]}>{scenario.difficulty}</Text>
+          <View style={[styles.diffBadge, { backgroundColor: scenario.color + '22' }]}>
+            <Text style={[styles.diffText, { color: scenario.color }]}>{scenario.difficulty}</Text>
           </View>
           <Ionicons name="time-outline" size={12} color={colors.textMuted} />
           <Text style={styles.durationText}>{scenario.duration}</Text>
+          <View style={styles.xpBadge}>
+            <Text style={styles.xpText}>+{XP_REWARDS.LESSON_PRACTICE} XP</Text>
+          </View>
         </View>
       </View>
       <Ionicons name="play-circle" size={32} color={scenario.color} />
@@ -40,48 +38,66 @@ function ScenarioCard({ scenario, onStart }) {
 }
 
 export default function PracticeScreen() {
+  const { addXP } = useApp();
   const [activeScenario, setActiveScenario] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [sessionDone, setSessionDone] = useState(false);
+  const [xpEarned, setXpEarned] = useState(false);
   const scrollRef = useRef(null);
 
   const startScenario = (scenario) => {
     setActiveScenario(scenario);
+    setSessionDone(false);
+    setXpEarned(false);
     setMessages([
       {
         id: 1,
         role: 'ai',
         text: scenario.initialMessage,
-        time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+        time: now(),
       },
     ]);
   };
 
-  const sendMessage = () => {
+  const now = () =>
+    new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  const sendMessage = async () => {
     if (!input.trim() || isTyping) return;
-    const userMsg = {
-      id: messages.length + 1,
-      role: 'user',
-      text: input.trim(),
-      time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-    };
-    setMessages((m) => [...m, userMsg]);
+
+    const userText = input.trim();
+    const userMsg = { id: messages.length + 1, role: 'user', text: userText, time: now() };
+    const updatedMessages = [...messages, userMsg];
+
+    setMessages(updatedMessages);
     setInput('');
     setIsTyping(true);
 
-    const delay = 1000 + Math.random() * 1000;
-    setTimeout(() => {
-      const aiResponse = getRandomResponse(activeScenario, messages.length);
-      const aiMsg = {
-        id: messages.length + 2,
-        role: 'ai',
-        text: aiResponse,
-        time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-      };
+    try {
+      const aiText = await getAIResponse(activeScenario, updatedMessages);
+      const aiMsg = { id: updatedMessages.length + 1, role: 'ai', text: aiText, time: now() };
       setMessages((m) => [...m, aiMsg]);
+
+      // Award XP after 5+ messages
+      if (updatedMessages.length >= 5 && !xpEarned) {
+        setXpEarned(true);
+        await addXP(XP_REWARDS.LESSON_PRACTICE, 'pratique IA');
+      }
+
+      // End session after 10 exchanges
+      if (updatedMessages.filter((m) => m.role === 'user').length >= 6) {
+        setSessionDone(true);
+      }
+    } catch (e) {
+      setMessages((m) => [
+        ...m,
+        { id: m.length + 1, role: 'ai', text: 'Désolé, une erreur est survenue.', time: now() },
+      ]);
+    } finally {
       setIsTyping(false);
-    }, delay);
+    }
   };
 
   useEffect(() => {
@@ -99,31 +115,29 @@ export default function PracticeScreen() {
             <Text style={styles.subtitle}>Simulez des situations réelles avec l'IA</Text>
           </View>
 
-          <View style={styles.aiInfo}>
-            <LinearGradient colors={['#10B98133', '#06B6D433']} style={styles.aiInfoGradient}>
-              <Text style={styles.aiInfoIcon}>🤖</Text>
-              <View style={styles.aiInfoBody}>
-                <Text style={styles.aiInfoTitle}>Coaching IA en temps réel</Text>
-                <Text style={styles.aiInfoText}>
-                  Pratiquez dans des scénarios réalistes et recevez un retour immédiat
-                  sur votre style de communication.
-                </Text>
-              </View>
-            </LinearGradient>
+          {/* AI Status Banner */}
+          <View style={[styles.aiBanner, { borderColor: isAIEnabled() ? '#10B98133' : '#F59E0B33' }]}>
+            <View style={[styles.aiDot, { backgroundColor: isAIEnabled() ? '#10B981' : '#F59E0B' }]} />
+            <View style={styles.aiBannerBody}>
+              <Text style={styles.aiBannerTitle}>
+                {isAIEnabled() ? '🤖 IA Claude connectée' : '⚡ Mode simulation activé'}
+              </Text>
+              <Text style={styles.aiBannerText}>
+                {isAIEnabled()
+                  ? 'Conversations authentiques avec Claude Haiku'
+                  : 'Ajoutez EXPO_PUBLIC_CLAUDE_API_KEY pour activer l\'IA réelle'}
+              </Text>
+            </View>
           </View>
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Choisissez un scénario</Text>
             {practiceScenarios.map((scenario) => (
-              <ScenarioCard
-                key={scenario.id}
-                scenario={scenario}
-                onStart={() => startScenario(scenario)}
-              />
+              <ScenarioCard key={scenario.id} scenario={scenario} onStart={() => startScenario(scenario)} />
             ))}
           </View>
 
-          <View style={styles.tips}>
+          <View style={styles.tipsCard}>
             <Text style={styles.tipsTitle}>💡 Conseils pour progresser</Text>
             {[
               'Soyez aussi naturel(le) que possible — c\'est un espace sûr',
@@ -137,7 +151,6 @@ export default function PracticeScreen() {
               </View>
             ))}
           </View>
-
           <View style={{ height: 100 }} />
         </ScrollView>
       </SafeAreaView>
@@ -149,7 +162,6 @@ export default function PracticeScreen() {
       <KeyboardAvoidingView
         style={styles.chatContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
       >
         {/* Chat Header */}
         <View style={styles.chatHeader}>
@@ -157,37 +169,37 @@ export default function PracticeScreen() {
             <Ionicons name="arrow-back" size={22} color={colors.text} />
           </TouchableOpacity>
           <View style={[styles.chatAvatar, { backgroundColor: activeScenario.color + '33' }]}>
-            <Text style={styles.chatAvatarText}>{activeScenario.icon}</Text>
+            <Text style={{ fontSize: 18 }}>{activeScenario.icon}</Text>
           </View>
           <View style={styles.chatHeaderInfo}>
             <Text style={styles.chatTitle}>{activeScenario.title}</Text>
-            <View style={styles.onlineIndicator}>
-              <View style={styles.onlineDot} />
-              <Text style={styles.onlineText}>IA active</Text>
+            <View style={styles.onlineRow}>
+              <View style={[styles.onlineDot, { backgroundColor: isAIEnabled() ? '#10B981' : '#F59E0B' }]} />
+              <Text style={[styles.onlineText, { color: isAIEnabled() ? '#10B981' : '#F59E0B' }]}>
+                {isAIEnabled() ? 'Claude IA' : 'Simulation'}
+              </Text>
             </View>
           </View>
-          <View style={[styles.difficultyBadgeSm, { backgroundColor: activeScenario.color + '22' }]}>
-            <Text style={[styles.difficultyTextSm, { color: activeScenario.color }]}>
-              {activeScenario.difficulty}
-            </Text>
-          </View>
+          {xpEarned && (
+            <View style={styles.xpEarnedBadge}>
+              <Text style={styles.xpEarnedText}>+{XP_REWARDS.LESSON_PRACTICE} XP ✓</Text>
+            </View>
+          )}
         </View>
 
-        {/* Tips banner */}
-        {activeScenario.tips && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.tipsBanner}
-            contentContainerStyle={styles.tipsBannerContent}
-          >
-            {activeScenario.tips.map((tip, i) => (
-              <View key={i} style={styles.tipChip}>
-                <Text style={styles.tipChipText}>💡 {tip}</Text>
-              </View>
-            ))}
-          </ScrollView>
-        )}
+        {/* Tips */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.tipsBanner}
+          contentContainerStyle={styles.tipsBannerContent}
+        >
+          {activeScenario.tips.map((tip, i) => (
+            <View key={i} style={styles.tipChip}>
+              <Text style={styles.tipChipText}>💡 {tip}</Text>
+            </View>
+          ))}
+        </ScrollView>
 
         {/* Messages */}
         <ScrollView
@@ -197,21 +209,13 @@ export default function PracticeScreen() {
           showsVerticalScrollIndicator={false}
         >
           {messages.map((msg) => (
-            <View
-              key={msg.id}
-              style={[styles.msgRow, msg.role === 'user' && styles.msgRowUser]}
-            >
+            <View key={msg.id} style={[styles.msgRow, msg.role === 'user' && styles.msgRowUser]}>
               {msg.role === 'ai' && (
                 <View style={[styles.msgAvatar, { backgroundColor: activeScenario.color + '33' }]}>
                   <Text style={{ fontSize: 14 }}>{activeScenario.icon}</Text>
                 </View>
               )}
-              <View
-                style={[
-                  styles.bubble,
-                  msg.role === 'ai' ? styles.bubbleAi : styles.bubbleUser,
-                ]}
-              >
+              <View style={[styles.bubble, msg.role === 'ai' ? styles.bubbleAi : styles.bubbleUser]}>
                 <Text style={[styles.bubbleText, msg.role === 'user' && styles.bubbleTextUser]}>
                   {msg.text}
                 </Text>
@@ -231,31 +235,51 @@ export default function PracticeScreen() {
               </View>
             </View>
           )}
+
+          {/* Session end */}
+          {sessionDone && (
+            <View style={styles.sessionEnd}>
+              <Text style={styles.sessionEndEmoji}>🎉</Text>
+              <Text style={styles.sessionEndTitle}>Session terminée !</Text>
+              <Text style={styles.sessionEndText}>
+                Excellente pratique. Vous avez gagné {XP_REWARDS.LESSON_PRACTICE} XP.
+              </Text>
+              <TouchableOpacity
+                style={styles.sessionEndBtn}
+                onPress={() => setActiveScenario(null)}
+              >
+                <LinearGradient colors={['#7C3AED', '#EC4899']} style={styles.sessionEndGradient}>
+                  <Text style={styles.sessionEndBtnText}>Choisir un nouveau scénario</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          )}
         </ScrollView>
 
         {/* Input */}
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.chatInput}
-            placeholder="Écrivez votre réponse..."
-            placeholderTextColor={colors.textMuted}
-            value={input}
-            onChangeText={setInput}
-            multiline
-            maxLength={500}
-            returnKeyType="send"
-          />
-          <TouchableOpacity
-            style={[
-              styles.sendBtn,
-              { backgroundColor: input.trim() ? activeScenario.color : colors.border },
-            ]}
-            onPress={sendMessage}
-            disabled={!input.trim() || isTyping}
-          >
-            <Ionicons name="send" size={18} color="#fff" />
-          </TouchableOpacity>
-        </View>
+        {!sessionDone && (
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.chatInput}
+              placeholder="Écrivez votre réponse..."
+              placeholderTextColor={colors.textMuted}
+              value={input}
+              onChangeText={setInput}
+              multiline
+              maxLength={500}
+            />
+            <TouchableOpacity
+              style={[
+                styles.sendBtn,
+                { backgroundColor: input.trim() ? activeScenario.color : colors.border },
+              ]}
+              onPress={sendMessage}
+              disabled={!input.trim() || isTyping}
+            >
+              <Ionicons name="send" size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -267,12 +291,21 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
   title: { fontSize: 26, fontWeight: '800', color: colors.text },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
-  aiInfo: { marginHorizontal: 20, marginVertical: 16, borderRadius: 16, overflow: 'hidden' },
-  aiInfoGradient: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 },
-  aiInfoIcon: { fontSize: 36 },
-  aiInfoBody: { flex: 1 },
-  aiInfoTitle: { fontSize: 15, fontWeight: '700', color: colors.text, marginBottom: 4 },
-  aiInfoText: { fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
+  aiBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginVertical: 14,
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    padding: 14,
+    gap: 12,
+    borderWidth: 1,
+  },
+  aiDot: { width: 10, height: 10, borderRadius: 5 },
+  aiBannerBody: { flex: 1 },
+  aiBannerTitle: { fontSize: 14, fontWeight: '700', color: colors.text, marginBottom: 2 },
+  aiBannerText: { fontSize: 12, color: colors.textSecondary, lineHeight: 16 },
   section: { paddingHorizontal: 20 },
   sectionTitle: { fontSize: 18, fontWeight: '800', color: colors.text, marginBottom: 14 },
   scenarioCard: {
@@ -291,13 +324,22 @@ const styles = StyleSheet.create({
   scenarioInfo: { flex: 1 },
   scenarioTitle: { fontSize: 15, fontWeight: '700', color: colors.text, marginBottom: 4 },
   scenarioDesc: { fontSize: 12, color: colors.textSecondary, lineHeight: 17, marginBottom: 8 },
-  scenarioMeta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  difficultyBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  difficultyText: { fontSize: 11, fontWeight: '700' },
+  scenarioMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  diffBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  diffText: { fontSize: 11, fontWeight: '700' },
   durationText: { fontSize: 11, color: colors.textMuted },
-  tips: {
+  xpBadge: {
+    backgroundColor: '#7C3AED22',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#7C3AED44',
+  },
+  xpText: { fontSize: 11, fontWeight: '700', color: colors.primaryLight },
+  tipsCard: {
     marginHorizontal: 20,
-    marginTop: 24,
+    marginTop: 20,
     backgroundColor: colors.surface,
     borderRadius: 16,
     padding: 16,
@@ -308,7 +350,7 @@ const styles = StyleSheet.create({
   tipItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 8 },
   tipDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary, marginTop: 6 },
   tipText: { fontSize: 13, color: colors.textSecondary, flex: 1, lineHeight: 19 },
-  // Chat styles
+  // Chat
   chatContainer: { flex: 1 },
   chatHeader: {
     flexDirection: 'row',
@@ -321,14 +363,20 @@ const styles = StyleSheet.create({
   },
   chatBackBtn: { padding: 4 },
   chatAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  chatAvatarText: { fontSize: 18 },
   chatHeaderInfo: { flex: 1 },
   chatTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
-  onlineIndicator: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
-  onlineDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.success },
-  onlineText: { fontSize: 11, color: colors.success, fontWeight: '600' },
-  difficultyBadgeSm: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  difficultyTextSm: { fontSize: 10, fontWeight: '700' },
+  onlineRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  onlineDot: { width: 6, height: 6, borderRadius: 3 },
+  onlineText: { fontSize: 11, fontWeight: '600' },
+  xpEarnedBadge: {
+    backgroundColor: '#7C3AED22',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#7C3AED44',
+  },
+  xpEarnedText: { fontSize: 11, fontWeight: '700', color: colors.primaryLight },
   tipsBanner: { maxHeight: 46, borderBottomWidth: 1, borderBottomColor: colors.border },
   tipsBannerContent: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
   tipChip: {
@@ -345,12 +393,7 @@ const styles = StyleSheet.create({
   msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   msgRowUser: { flexDirection: 'row-reverse' },
   msgAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  bubble: {
-    maxWidth: '75%',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
+  bubble: { maxWidth: '75%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   bubbleAi: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   bubbleUser: { backgroundColor: colors.primary },
   bubbleText: { fontSize: 14, color: colors.text, lineHeight: 20 },
@@ -366,6 +409,22 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   typingText: { fontSize: 13, color: colors.textMuted, fontStyle: 'italic' },
+  sessionEnd: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sessionEndEmoji: { fontSize: 48, marginBottom: 12 },
+  sessionEndTitle: { fontSize: 20, fontWeight: '800', color: colors.text, marginBottom: 8 },
+  sessionEndText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: 16 },
+  sessionEndBtn: { width: '100%', borderRadius: 14, overflow: 'hidden' },
+  sessionEndGradient: { paddingVertical: 14, alignItems: 'center' },
+  sessionEndBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -387,11 +446,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  sendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  sendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
 });
